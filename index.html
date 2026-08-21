@@ -1,0 +1,1667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Luma — Lua IDE</title>
+
+<!-- CodeMirror 5 core + Lua mode + addons (folding, matching brackets, active line, search) -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldgutter.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/dialog/dialog.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/lua/lua.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldgutter.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/indent-fold.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/selection/active-line.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/searchcursor.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/search.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/dialog/dialog.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/scroll/annotatescrollbar.min.js"></script>
+
+<!-- Fengari: real Lua 5.3 VM compiled to JS, for actual execution -->
+<script src="https://cdn.jsdelivr.net/npm/fengari-web@0.1.4/dist/fengari-web.js"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+/* ============================= TOKENS ============================= */
+:root{
+  --bg:            #0c0e11;
+  --surface:       #14171b;
+  --surface-raised:#1a1e23;
+  --surface-hi:    #20252b;
+  --border:        #262b32;
+  --border-soft:   #1d2127;
+  --accent:        #7ea6c4;
+  --accent-dim:    #4d6a80;
+  --accent-wash:   rgba(126,166,196,0.10);
+  --text:          #e6e8eb;
+  --text-dim:      #9aa1ab;
+  --text-faint:    #5c6470;
+  --green:         #7fb885;
+  --red:           #e0796f;
+  --amber:         #d9b46a;
+  --radius-sm:     6px;
+  --radius-md:     9px;
+  --font-ui:       'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-code:     'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  --ease:          cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{height:100%; overscroll-behavior:none;}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:var(--font-ui);
+  -webkit-font-smoothing:antialiased;
+  overflow:hidden; position:fixed; inset:0;
+  font-size:14px;
+}
+button{font-family:inherit; cursor:pointer;}
+input,select{font-family:inherit;}
+::selection{background:rgba(126,166,196,0.28);}
+
+/* ============================= APP SHELL ============================= */
+#app{
+  height:100%; width:100%; display:flex; flex-direction:column;
+  position:relative;
+}
+
+/* ---- Top bar ---- */
+.topbar{
+  height:52px; min-height:52px; display:flex; align-items:center;
+  gap:2px; padding:0 6px 0 12px;
+  background:var(--surface); border-bottom:1px solid var(--border-soft);
+  padding-top:env(safe-area-inset-top,0);
+  height:calc(52px + env(safe-area-inset-top,0));
+}
+.topbar-file{
+  display:flex; align-items:center; gap:7px; flex:1; min-width:0;
+  padding:6px 8px; border-radius:var(--radius-sm);
+}
+.file-dot{width:6px;height:6px;border-radius:50%;background:var(--amber); flex-shrink:0;}
+.file-dot.saved{background:var(--green); opacity:0.55;}
+.file-name{
+  font-size:13.5px; font-weight:600; color:var(--text);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.file-path{font-size:11px; color:var(--text-faint); font-weight:400;}
+
+.tb-btn{
+  width:36px; height:36px; display:flex; align-items:center; justify-content:center;
+  background:transparent; border:none; border-radius:var(--radius-sm); color:var(--text-dim);
+  transition:background 150ms var(--ease), color 150ms var(--ease);
+  flex-shrink:0;
+}
+.tb-btn:active{background:var(--surface-hi); color:var(--text);}
+.tb-btn:disabled{opacity:0.3; pointer-events:none;}
+.tb-btn svg{width:18px; height:18px;}
+
+.run-btn{
+  display:flex; align-items:center; gap:6px;
+  height:36px; padding:0 14px; margin-left:4px;
+  background:var(--accent); color:#0c0e11; border:none;
+  border-radius:var(--radius-sm); font-weight:700; font-size:13px;
+  transition:transform 120ms var(--ease), background 150ms var(--ease), opacity 150ms;
+  flex-shrink:0;
+}
+.run-btn:active{transform:scale(0.95); background:#8fb4cf;}
+.run-btn.running{background:var(--surface-hi); color:var(--text-dim); pointer-events:none;}
+.run-btn svg{width:14px; height:14px;}
+.run-spinner{
+  width:13px; height:13px; border-radius:50%;
+  border:2px solid var(--border); border-top-color:var(--accent);
+  animation:spin 0.7s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+/* ---- Editor area ---- */
+.editor-wrap{flex:1; min-height:0; position:relative; background:var(--surface);}
+.CodeMirror{
+  height:100%; background:var(--surface) !important; color:var(--text) !important;
+  font-family:var(--font-code) !important; font-size:15px; line-height:1.6;
+  padding-top:6px;
+}
+.CodeMirror-gutters{background:var(--surface) !important; border-right:1px solid var(--border-soft) !important;}
+.CodeMirror-linenumber{color:var(--text-faint) !important; font-size:12.5px; padding-right:10px !important;}
+.CodeMirror-cursor{border-left:2px solid var(--accent) !important;}
+.CodeMirror-activeline-background{background:rgba(255,255,255,0.028) !important;}
+.CodeMirror-selected{background:rgba(126,166,196,0.18) !important;}
+.CodeMirror-matchingbracket{color:var(--accent) !important; background:var(--accent-wash); border-radius:3px;}
+.CodeMirror-foldgutter{width:14px;}
+.CodeMirror-foldgutter-open:after{color:var(--text-faint); content:"▾";}
+.CodeMirror-foldgutter-folded:after{color:var(--accent); content:"▸";}
+.CodeMirror-dialog{background:var(--surface-raised) !important; color:var(--text) !important; border-bottom:1px solid var(--border) !important; padding:8px 10px !important;}
+.CodeMirror-dialog input{background:var(--surface-hi); border:1px solid var(--border); color:var(--text); border-radius:4px; padding:4px 8px; font-family:var(--font-code);}
+
+/* Lua syntax colors — professional, readable on dark */
+.cm-keyword{color:#c893d6 !important; font-weight:500;}
+.cm-def, .cm-variable-2{color:#e6e8eb !important;}
+.cm-string{color:#9dc98d !important;}
+.cm-number{color:#d9a066 !important;}
+.cm-comment{color:#5c6470 !important; font-style:italic;}
+.cm-atom{color:#7ea6c4 !important;}
+.cm-operator{color:#8ba3b8 !important;}
+.cm-variable{color:#e6e8eb !important;}
+.cm-property{color:#a6c8e0 !important;}
+.cm-builtin{color:#7ea6c4 !important;}
+.cm-bracket{color:#9aa1ab !important;}
+
+/* ---- Keyboard toolbar (quick chars) ---- */
+.kbd-toolbar{
+  display:flex; align-items:center; gap:2px; overflow-x:auto;
+  height:42px; min-height:42px; background:var(--surface-raised);
+  border-top:1px solid var(--border-soft); padding:0 6px;
+  scrollbar-width:none;
+}
+.kbd-toolbar::-webkit-scrollbar{display:none;}
+.kbd-key{
+  flex-shrink:0; min-width:34px; height:32px; padding:0 8px;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--surface-hi); border:1px solid var(--border-soft);
+  border-radius:5px; color:var(--text); font-family:var(--font-code);
+  font-size:13.5px; font-weight:500; margin:0 2px;
+  transition:background 100ms;
+}
+.kbd-key:active{background:var(--accent-wash); border-color:var(--accent-dim);}
+.kbd-sep{width:1px; height:20px; background:var(--border); margin:0 4px; flex-shrink:0;}
+.kbd-key.wide{min-width:52px; font-size:11px; font-weight:600; letter-spacing:0.03em; color:var(--text-dim);}
+
+/* ============================= CONSOLE (bottom sheet) ============================= */
+.console-sheet{
+  position:absolute; left:0; right:0; bottom:0;
+  background:var(--surface-raised); border-top:1px solid var(--border);
+  border-radius:14px 14px 0 0;
+  box-shadow:0 -8px 24px rgba(0,0,0,0.35);
+  display:flex; flex-direction:column;
+  height:44px; /* collapsed */
+  transition:height 280ms var(--ease);
+  z-index:20;
+  touch-action:none;
+}
+.console-sheet.dragging{transition:none;}
+.console-sheet.state-half{height:42vh;}
+.console-sheet.state-full{height:82vh;}
+
+.console-handle-zone{
+  height:44px; min-height:44px; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:6px; flex-shrink:0;
+  position:relative; padding:0 12px;
+}
+.console-grip{width:36px; height:4px; border-radius:2px; background:var(--border);}
+.console-summary{
+  position:absolute; left:14px; right:110px; top:50%; transform:translateY(-50%);
+  display:flex; align-items:center; gap:8px; pointer-events:none;
+}
+.status-dot{width:7px; height:7px; border-radius:50%; background:var(--text-faint); flex-shrink:0;}
+.status-dot.ok{background:var(--green);}
+.status-dot.err{background:var(--red);}
+.status-dot.running{background:var(--amber); animation:pulse 1s ease-in-out infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+.console-summary-text{font-size:12px; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:var(--font-code);}
+
+.console-quickbtns{
+  position:absolute; right:10px; top:50%; transform:translateY(-50%);
+  display:flex; align-items:center; gap:2px;
+}
+.console-qbtn{
+  width:30px; height:30px; display:flex; align-items:center; justify-content:center;
+  background:transparent; border:none; border-radius:6px; color:var(--text-dim);
+}
+.console-qbtn svg{width:15px; height:15px;}
+.console-qbtn:active{background:var(--surface-hi);}
+
+.console-body{flex:1; min-height:0; display:flex; flex-direction:column; opacity:0; transition:opacity 180ms; pointer-events:none;}
+.console-sheet.state-half .console-body, .console-sheet.state-full .console-body{opacity:1; pointer-events:auto;}
+
+.console-tabs{
+  display:flex; gap:2px; padding:0 10px; border-bottom:1px solid var(--border-soft); flex-shrink:0;
+}
+.console-tab{
+  padding:9px 4px; margin-right:16px; background:none; border:none;
+  color:var(--text-faint); font-size:12.5px; font-weight:600; letter-spacing:0.01em;
+  border-bottom:2px solid transparent; position:relative;
+}
+.console-tab.active{color:var(--text); border-bottom-color:var(--accent);}
+.console-tab .count{
+  display:inline-block; min-width:15px; padding:0 3px; margin-left:5px; height:15px; line-height:15px;
+  background:var(--surface-hi); border-radius:8px; font-size:10px; color:var(--text-dim); text-align:center;
+}
+.console-tab.active .count.err-count{background:rgba(224,121,111,0.18); color:var(--red);}
+
+.console-scroll{
+  flex:1; overflow-y:auto; padding:10px 12px 20px; font-family:var(--font-code); font-size:13px; line-height:1.65;
+  -webkit-overflow-scrolling:touch;
+}
+.console-line{display:flex; gap:8px; margin-bottom:1px; white-space:pre-wrap; word-break:break-word;}
+.console-line .ts{color:var(--text-faint); font-size:11px; flex-shrink:0; padding-top:1px; display:none;}
+.console-sheet.show-ts .ts{display:inline;}
+.console-line.out{color:var(--text);}
+.console-line.err{color:var(--red);}
+.console-line.warn{color:var(--amber);}
+.console-line.sys{color:var(--text-faint); font-style:italic;}
+.console-line.result{color:var(--accent);}
+.console-empty{color:var(--text-faint); font-style:italic; padding:20px 4px; text-align:center; font-family:var(--font-ui); font-size:12.5px;}
+
+/* ============================= SIDE PANELS (Files / AI / Settings) ============================= */
+.panel-scrim{
+  position:absolute; inset:0; background:rgba(0,0,0,0.45); opacity:0; pointer-events:none;
+  transition:opacity 220ms var(--ease); z-index:29;
+}
+.panel-scrim.open{opacity:1; pointer-events:auto;}
+
+.side-panel{
+  position:absolute; top:0; bottom:0; right:0; width:88%; max-width:380px;
+  background:var(--surface); border-left:1px solid var(--border);
+  transform:translateX(100%); transition:transform 260ms var(--ease);
+  z-index:30; display:flex; flex-direction:column;
+  box-shadow:-12px 0 32px rgba(0,0,0,0.4);
+}
+.side-panel.open{transform:translateX(0);}
+.panel-header{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:16px 16px 14px; padding-top:calc(16px + env(safe-area-inset-top,0));
+  border-bottom:1px solid var(--border-soft); flex-shrink:0;
+}
+.panel-title{font-size:15px; font-weight:700;}
+.panel-close{width:32px; height:32px; display:flex; align-items:center; justify-content:center; background:var(--surface-hi); border:none; border-radius:7px; color:var(--text-dim);}
+.panel-close svg{width:16px;height:16px;}
+.panel-content{flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch;}
+
+/* Files panel */
+.file-section-label{
+  padding:14px 16px 6px; font-size:11px; font-weight:700; color:var(--text-faint);
+  letter-spacing:0.06em; text-transform:uppercase;
+}
+.file-row{
+  display:flex; align-items:center; gap:10px; padding:10px 16px;
+  border-bottom:1px solid var(--border-soft);
+}
+.file-row:active{background:var(--surface-hi);}
+.file-icon{width:16px; height:16px; flex-shrink:0; color:var(--text-faint);}
+.file-icon.active{color:var(--accent);}
+.file-icon.folder{color:var(--amber);}
+.file-row-name{flex:1; font-size:13.5px; font-family:var(--font-code); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.file-row-name.active{color:var(--accent); font-weight:600;}
+.file-row-indent{width:14px; flex-shrink:0;}
+.file-row-actions{display:flex; gap:2px;}
+.file-mini-btn{width:26px; height:26px; display:flex; align-items:center; justify-content:center; background:none; border:none; color:var(--text-faint); border-radius:5px;}
+.file-mini-btn svg{width:13px; height:13px;}
+.file-mini-btn:active{background:var(--surface-hi); color:var(--text);}
+
+.panel-footer{display:flex; gap:8px; padding:12px 16px; padding-bottom:calc(12px + env(safe-area-inset-bottom,0)); border-top:1px solid var(--border-soft); flex-shrink:0;}
+.footer-btn{
+  flex:1; height:38px; display:flex; align-items:center; justify-content:center; gap:6px;
+  background:var(--surface-hi); border:1px solid var(--border); border-radius:var(--radius-sm);
+  color:var(--text); font-size:12.5px; font-weight:600;
+}
+.footer-btn:active{background:var(--surface-raised);}
+.footer-btn.primary{background:var(--accent); color:#0c0e11; border-color:var(--accent);}
+.footer-btn svg{width:14px;height:14px;}
+
+/* AI Panel */
+.ai-msgs{padding:14px 16px; display:flex; flex-direction:column; gap:12px;}
+.ai-msg{max-width:88%; padding:10px 12px; border-radius:11px; font-size:13px; line-height:1.55;}
+.ai-msg.user{align-self:flex-end; background:var(--accent-wash); border:1px solid var(--accent-dim); border-bottom-right-radius:3px;}
+.ai-msg.ai{align-self:flex-start; background:var(--surface-hi); border:1px solid var(--border-soft); border-bottom-left-radius:3px; max-width:96%;}
+.ai-msg pre{
+  background:var(--bg); border:1px solid var(--border-soft); border-radius:7px; padding:10px;
+  overflow-x:auto; font-family:var(--font-code); font-size:12px; line-height:1.55; margin:8px 0 4px;
+}
+.ai-msg-actions{display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;}
+.ai-action-btn{
+  padding:5px 10px; background:var(--bg); border:1px solid var(--border); border-radius:6px;
+  color:var(--text-dim); font-size:11px; font-weight:600;
+}
+.ai-action-btn:active{background:var(--surface-hi); color:var(--text);}
+.ai-empty{padding:40px 20px; text-align:center; color:var(--text-faint); font-size:13px;}
+.ai-empty svg{width:32px; height:32px; margin-bottom:12px; opacity:0.5;}
+.ai-suggestions{display:flex; flex-direction:column; gap:6px; padding:0 16px 14px;}
+.ai-suggestion{
+  text-align:left; padding:9px 12px; background:var(--surface-hi); border:1px solid var(--border-soft);
+  border-radius:8px; color:var(--text-dim); font-size:12.5px;
+}
+.ai-suggestion:active{background:var(--surface-raised);}
+.ai-input-bar{
+  display:flex; align-items:flex-end; gap:8px; padding:10px 12px;
+  padding-bottom:calc(10px + env(safe-area-inset-bottom,0));
+  border-top:1px solid var(--border-soft); flex-shrink:0; background:var(--surface);
+}
+.ai-textarea{
+  flex:1; resize:none; background:var(--surface-hi); border:1px solid var(--border);
+  border-radius:9px; padding:9px 12px; color:var(--text); font-size:13.5px; font-family:var(--font-ui);
+  max-height:100px; line-height:1.4;
+}
+.ai-textarea:focus{outline:none; border-color:var(--accent-dim);}
+.ai-send{
+  width:36px; height:36px; flex-shrink:0; border-radius:9px; background:var(--accent); border:none;
+  display:flex; align-items:center; justify-content:center; color:#0c0e11;
+}
+.ai-send:disabled{background:var(--surface-hi); color:var(--text-faint);}
+.ai-send svg{width:16px;height:16px;}
+.ai-typing{display:flex; gap:3px; padding:4px 0;}
+.ai-typing span{width:5px; height:5px; border-radius:50%; background:var(--text-faint); animation:typing 1.2s infinite ease-in-out;}
+.ai-typing span:nth-child(2){animation-delay:0.15s;}
+.ai-typing span:nth-child(3){animation-delay:0.3s;}
+@keyframes typing{0%,60%,100%{opacity:0.3; transform:translateY(0);}30%{opacity:1; transform:translateY(-2px);}}
+
+/* Settings Panel */
+.settings-group{padding:4px 0 8px;}
+.settings-group-label{padding:16px 16px 8px; font-size:11px; font-weight:700; color:var(--accent); letter-spacing:0.06em; text-transform:uppercase;}
+.settings-row{display:flex; align-items:center; justify-content:space-between; padding:11px 16px; border-bottom:1px solid var(--border-soft); gap:12px;}
+.settings-row-label{font-size:13.5px; color:var(--text);}
+.settings-row-sub{font-size:11.5px; color:var(--text-faint); margin-top:2px;}
+.settings-control{flex-shrink:0;}
+
+.switch{width:42px; height:24px; border-radius:12px; background:var(--surface-hi); border:1px solid var(--border); position:relative; transition:background 150ms;}
+.switch.on{background:var(--accent-dim); border-color:var(--accent-dim);}
+.switch-knob{position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%; background:var(--text); transition:transform 150ms var(--ease);}
+.switch.on .switch-knob{transform:translateX(18px); background:#0c0e11;}
+
+.stepper{display:flex; align-items:center; gap:0; background:var(--surface-hi); border:1px solid var(--border); border-radius:7px; overflow:hidden;}
+.stepper button{width:28px; height:28px; background:none; border:none; color:var(--text-dim); font-size:15px; display:flex; align-items:center; justify-content:center;}
+.stepper button:active{background:var(--surface-raised); color:var(--text);}
+.stepper-val{width:32px; text-align:center; font-size:12.5px; font-family:var(--font-code); color:var(--text);}
+
+.seg-control{display:flex; background:var(--surface-hi); border:1px solid var(--border); border-radius:7px; padding:2px;}
+.seg-btn{padding:5px 10px; background:none; border:none; color:var(--text-dim); font-size:11.5px; font-weight:600; border-radius:5px;}
+.seg-btn.active{background:var(--accent); color:#0c0e11;}
+
+.settings-select{background:var(--surface-hi); border:1px solid var(--border); color:var(--text); border-radius:7px; padding:6px 8px; font-size:12.5px;}
+.range-row{padding:11px 16px 14px; border-bottom:1px solid var(--border-soft);}
+input[type="range"]{width:100%; accent-color:var(--accent); margin-top:8px;}
+.api-input{width:100%; background:var(--surface-hi); border:1px solid var(--border); color:var(--text); border-radius:7px; padding:9px 10px; font-size:12.5px; font-family:var(--font-code); margin-top:8px;}
+.api-input:focus{outline:none; border-color:var(--accent-dim);}
+
+/* ============================= HOME / PROJECT DASHBOARD ============================= */
+.home-screen{
+  position:absolute; inset:0; background:var(--bg); z-index:40;
+  display:flex; flex-direction:column; transform:translateY(0); transition:transform 300ms var(--ease), opacity 300ms var(--ease);
+}
+.home-screen.hidden{transform:translateY(-16px); opacity:0; pointer-events:none;}
+.home-topbar{
+  padding:calc(18px + env(safe-area-inset-top,0)) 20px 4px;
+  display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
+}
+.home-brand{display:flex; align-items:center; gap:9px;}
+.home-brand-mark{width:28px; height:28px; border-radius:7px; background:var(--accent); display:flex; align-items:center; justify-content:center; color:#0c0e11; font-weight:800; font-size:14px; font-family:var(--font-code);}
+.home-brand-name{font-size:16px; font-weight:700; letter-spacing:-0.01em;}
+.home-search-btn{width:36px; height:36px; display:flex; align-items:center; justify-content:center; background:var(--surface-raised); border:1px solid var(--border-soft); border-radius:9px; color:var(--text-dim);}
+.home-search-btn svg{width:16px;height:16px;}
+
+.home-search-bar{
+  margin:12px 20px 4px; display:flex; align-items:center; gap:8px;
+  background:var(--surface-raised); border:1px solid var(--border); border-radius:9px; padding:9px 12px;
+}
+.home-search-bar svg{width:15px; height:15px; color:var(--text-faint); flex-shrink:0;}
+.home-search-bar input{flex:1; background:none; border:none; color:var(--text); font-size:13.5px;}
+.home-search-bar input:focus{outline:none;}
+
+.home-actions{display:flex; gap:8px; padding:16px 20px 8px;}
+.home-action{
+  flex:1; display:flex; flex-direction:column; align-items:flex-start; gap:10px;
+  background:var(--surface-raised); border:1px solid var(--border-soft); border-radius:var(--radius-md);
+  padding:13px 14px;
+}
+.home-action:active{background:var(--surface-hi); border-color:var(--border);}
+.home-action svg{width:18px; height:18px; color:var(--accent);}
+.home-action-label{font-size:12.5px; font-weight:600; color:var(--text);}
+
+.home-section-label{
+  padding:18px 20px 8px; font-size:11px; font-weight:700; color:var(--text-faint);
+  letter-spacing:0.06em; text-transform:uppercase; flex-shrink:0;
+}
+.home-list{flex:1; overflow-y:auto; padding:0 20px 24px; -webkit-overflow-scrolling:touch;}
+.project-row{
+  display:flex; align-items:center; gap:12px; padding:12px 4px;
+  border-bottom:1px solid var(--border-soft);
+}
+.project-row:active{opacity:0.7;}
+.project-icon{
+  width:38px; height:38px; border-radius:8px; background:var(--surface-hi); border:1px solid var(--border-soft);
+  display:flex; align-items:center; justify-content:center; flex-shrink:0; color:var(--accent);
+}
+.project-icon svg{width:17px; height:17px;}
+.project-meta{flex:1; min-width:0;}
+.project-name{font-size:14px; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.project-sub{font-size:11.5px; color:var(--text-faint); margin-top:2px;}
+.project-chevron{width:15px; height:15px; color:var(--text-faint); flex-shrink:0;}
+
+.home-empty{padding:60px 20px; text-align:center; color:var(--text-faint);}
+.home-empty svg{width:36px;height:36px; margin-bottom:14px; opacity:0.4;}
+.home-empty-title{font-size:13.5px; color:var(--text-dim); font-weight:600; margin-bottom:4px;}
+.home-empty-sub{font-size:12px;}
+
+/* toast */
+.toast{
+  position:absolute; bottom:70px; left:50%; transform:translateX(-50%) translateY(8px);
+  background:var(--surface-hi); border:1px solid var(--border); color:var(--text);
+  padding:9px 16px; border-radius:20px; font-size:12.5px; font-weight:500;
+  box-shadow:0 6px 20px rgba(0,0,0,0.4); z-index:60; opacity:0; pointer-events:none;
+  transition:opacity 200ms, transform 200ms; display:flex; align-items:center; gap:7px;
+}
+.toast.show{opacity:1; transform:translateX(-50%) translateY(0); pointer-events:auto;}
+.toast svg{width:14px;height:14px; flex-shrink:0;}
+.toast.err-toast{border-color:rgba(224,121,111,0.4);}
+
+/* modal (new file / rename / confirm) */
+.modal-scrim{position:absolute; inset:0; background:rgba(0,0,0,0.55); z-index:70; opacity:0; pointer-events:none; transition:opacity 200ms; display:flex; align-items:center; justify-content:center; padding:20px;}
+.modal-scrim.open{opacity:1; pointer-events:auto;}
+.modal-box{
+  width:100%; max-width:320px; background:var(--surface-raised); border:1px solid var(--border);
+  border-radius:12px; padding:18px; transform:scale(0.94); transition:transform 200ms var(--ease);
+  box-shadow:0 16px 40px rgba(0,0,0,0.5);
+}
+.modal-scrim.open .modal-box{transform:scale(1);}
+.modal-title{font-size:14.5px; font-weight:700; margin-bottom:4px;}
+.modal-sub{font-size:12px; color:var(--text-faint); margin-bottom:14px;}
+.modal-input{width:100%; background:var(--surface-hi); border:1px solid var(--border); color:var(--text); border-radius:7px; padding:10px 11px; font-size:13.5px; font-family:var(--font-code);}
+.modal-input:focus{outline:none; border-color:var(--accent-dim);}
+.modal-actions{display:flex; gap:8px; margin-top:16px;}
+.modal-btn{flex:1; height:38px; border-radius:7px; border:1px solid var(--border); background:var(--surface-hi); color:var(--text); font-size:13px; font-weight:600;}
+.modal-btn.primary{background:var(--accent); color:#0c0e11; border-color:var(--accent);}
+.modal-btn.danger{background:rgba(224,121,111,0.14); color:var(--red); border-color:rgba(224,121,111,0.3);}
+
+/* Bottom nav (minimal, editor-priority: only surfaces the non-editor destinations) */
+.quickbar{
+  position:absolute; top:calc(8px + env(safe-area-inset-top,0)); right:8px; z-index:15;
+  display:flex; gap:4px; background:var(--surface-raised); border:1px solid var(--border-soft);
+  border-radius:9px; padding:3px; opacity:0; pointer-events:none; transition:opacity 200ms;
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ============ TOP BAR ============ -->
+  <div class="topbar">
+    <button class="tb-btn" id="btnFiles" title="Files">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+    </button>
+    <div class="topbar-file" id="btnFileMenu">
+      <div class="file-dot saved" id="fileDot"></div>
+      <div style="min-width:0;">
+        <div class="file-name" id="topFileName">main.lua</div>
+      </div>
+    </div>
+    <button class="tb-btn" id="btnUndo" title="Undo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M3 13a9 9 0 1 0 3-7.7L3 7"/></svg>
+    </button>
+    <button class="tb-btn" id="btnRedo" title="Redo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7v6h-6"/><path d="M21 13a9 9 0 1 1-3-7.7L21 7"/></svg>
+    </button>
+    <button class="tb-btn" id="btnSettings" title="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+    <button class="tb-btn" id="btnAI" title="AI Assistant">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4L12 2z"/></svg>
+    </button>
+    <button class="run-btn" id="btnRun">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      <span id="runLabel">Run</span>
+    </button>
+  </div>
+
+  <!-- ============ EDITOR ============ -->
+  <div class="editor-wrap">
+    <textarea id="codeArea"></textarea>
+  </div>
+
+  <!-- ============ KEYBOARD TOOLBAR ============ -->
+  <div class="kbd-toolbar" id="kbdToolbar">
+    <button class="kbd-key wide" data-act="tab">TAB</button>
+    <div class="kbd-sep"></div>
+    <button class="kbd-key" data-ch="(">(</button>
+    <button class="kbd-key" data-ch=")">)</button>
+    <button class="kbd-key" data-ch="{">{</button>
+    <button class="kbd-key" data-ch="}">}</button>
+    <button class="kbd-key" data-ch="[">[</button>
+    <button class="kbd-key" data-ch="]">]</button>
+    <div class="kbd-sep"></div>
+    <button class="kbd-key" data-ch="=">=</button>
+    <button class="kbd-key" data-ch=":">:</button>
+    <button class="kbd-key" data-ch=";">;</button>
+    <button class="kbd-key" data-ch="_">_</button>
+    <button class="kbd-key" data-ch='"'>"</button>
+    <button class="kbd-key" data-ch="'">'</button>
+    <div class="kbd-sep"></div>
+    <button class="kbd-key" data-act="left">←</button>
+    <button class="kbd-key" data-act="right">→</button>
+    <button class="kbd-key" data-act="up">↑</button>
+    <button class="kbd-key" data-act="down">↓</button>
+    <div class="kbd-sep"></div>
+    <button class="kbd-key wide" data-act="undo">UNDO</button>
+    <button class="kbd-key wide" data-act="redo">REDO</button>
+  </div>
+
+  <!-- ============ CONSOLE SHEET ============ -->
+  <div class="console-sheet" id="consoleSheet">
+    <div class="console-handle-zone" id="consoleHandle">
+      <div class="console-summary" id="consoleSummary">
+        <div class="status-dot" id="statusDot"></div>
+        <div class="console-summary-text" id="statusText">Ready</div>
+      </div>
+      <div class="console-grip"></div>
+      <div class="console-quickbtns">
+        <button class="console-qbtn" id="btnClearConsole" title="Clear">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        </button>
+        <button class="console-qbtn" id="btnCopyConsole" title="Copy">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="console-body">
+      <div class="console-tabs">
+        <button class="console-tab active" data-tab="output">Output</button>
+        <button class="console-tab" data-tab="errors">Errors <span class="count err-count" id="errCount">0</span></button>
+        <button class="console-tab" data-tab="logs">Logs</button>
+      </div>
+      <div class="console-scroll" id="consoleScroll"></div>
+    </div>
+  </div>
+
+  <!-- ============ SCRIM (for panels) ============ -->
+  <div class="panel-scrim" id="panelScrim"></div>
+
+  <!-- ============ FILES PANEL ============ -->
+  <div class="side-panel" id="filesPanel">
+    <div class="panel-header">
+      <div class="panel-title">Files</div>
+      <button class="panel-close" data-close="filesPanel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="panel-content" id="fileTree"></div>
+    <div class="panel-footer">
+      <button class="footer-btn" id="btnImport">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Import
+      </button>
+      <button class="footer-btn primary" id="btnNewFile">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        New file
+      </button>
+    </div>
+    <input type="file" id="importInput" accept=".lua" multiple style="display:none;">
+  </div>
+
+  <!-- ============ AI PANEL ============ -->
+  <div class="side-panel" id="aiPanel">
+    <div class="panel-header">
+      <div class="panel-title">AI Assistant</div>
+      <button class="panel-close" data-close="aiPanel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="panel-content" id="aiContent">
+      <div class="ai-empty" id="aiEmpty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4L12 2z"/></svg>
+        <div>Ask about your code, or describe<br>what you want to build.</div>
+      </div>
+      <div class="ai-suggestions" id="aiSuggestions">
+        <button class="ai-suggestion" data-prompt="explain">Explain the selected code</button>
+        <button class="ai-suggestion" data-prompt="debug">Debug the last error</button>
+        <button class="ai-suggestion" data-prompt="prime">Write a function that checks if a number is prime</button>
+        <button class="ai-suggestion" data-prompt="optimize">Optimize the selected code</button>
+      </div>
+      <div class="ai-msgs" id="aiMsgs"></div>
+    </div>
+    <div class="ai-input-bar">
+      <textarea class="ai-textarea" id="aiInput" rows="1" placeholder="Ask the AI assistant…"></textarea>
+      <button class="ai-send" id="aiSend">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ============ SETTINGS PANEL ============ -->
+  <div class="side-panel" id="settingsPanel">
+    <div class="panel-header">
+      <div class="panel-title">Settings</div>
+      <button class="panel-close" data-close="settingsPanel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="panel-content" id="settingsContent">
+
+      <div class="settings-group">
+        <div class="settings-group-label">Editor</div>
+        <div class="settings-row">
+          <div><div class="settings-row-label">Font size</div></div>
+          <div class="stepper">
+            <button data-step="fontSize" data-dir="-1">−</button>
+            <div class="stepper-val" id="valFontSize">15</div>
+            <button data-step="fontSize" data-dir="1">+</button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div><div class="settings-row-label">Tab size</div></div>
+          <div class="stepper">
+            <button data-step="tabSize" data-dir="-1">−</button>
+            <div class="stepper-val" id="valTabSize">2</div>
+            <button data-step="tabSize" data-dir="1">+</button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div><div class="settings-row-label">Word wrap</div></div>
+          <div class="switch" data-toggle="wordWrap"><div class="switch-knob"></div></div>
+        </div>
+        <div class="settings-row">
+          <div><div class="settings-row-label">Line numbers</div></div>
+          <div class="switch on" data-toggle="lineNumbers"><div class="switch-knob"></div></div>
+        </div>
+        <div class="settings-row">
+          <div><div class="settings-row-label">Auto-indent</div></div>
+          <div class="switch on" data-toggle="autoIndent"><div class="switch-knob"></div></div>
+        </div>
+        <div class="settings-row">
+          <div><div class="settings-row-label">Code folding</div></div>
+          <div class="switch on" data-toggle="folding"><div class="switch-knob"></div></div>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-label">Theme</div>
+        <div class="settings-row">
+          <div><div class="settings-row-label">Appearance</div></div>
+          <div class="seg-control" id="themeSeg">
+            <button class="seg-btn active" data-theme="dark">Dark</button>
+            <button class="seg-btn" data-theme="oled">OLED</button>
+            <button class="seg-btn" data-theme="light">Light</button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div><div class="settings-row-label">Accent color</div><div class="settings-row-sub">Applied to cursor, run button, highlights</div></div>
+          <div style="display:flex; gap:6px;" id="accentSwatches">
+            <div class="accent-swatch" data-accent="#7ea6c4" style="width:22px;height:22px;border-radius:50%;background:#7ea6c4;border:2px solid var(--text);"></div>
+            <div class="accent-swatch" data-accent="#9dc98d" style="width:22px;height:22px;border-radius:50%;background:#9dc98d;border:2px solid transparent;"></div>
+            <div class="accent-swatch" data-accent="#d9a066" style="width:22px;height:22px;border-radius:50%;background:#d9a066;border:2px solid transparent;"></div>
+            <div class="accent-swatch" data-accent="#c893d6" style="width:22px;height:22px;border-radius:50%;background:#c893d6;border:2px solid transparent;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-label">Execution</div>
+        <div class="settings-row">
+          <div><div class="settings-row-label">Lua runtime</div><div class="settings-row-sub">Fengari · Lua 5.3 (in-browser VM)</div></div>
+        </div>
+        <div class="settings-row">
+          <div><div class="settings-row-label">Timeout</div></div>
+          <div class="stepper">
+            <button data-step="timeout" data-dir="-1">−</button>
+            <div class="stepper-val" id="valTimeout">5s</div>
+            <button data-step="timeout" data-dir="1">+</button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div><div class="settings-row-label">Auto-scroll console</div></div>
+          <div class="switch on" data-toggle="autoScroll"><div class="switch-knob"></div></div>
+        </div>
+        <div class="settings-row">
+          <div><div class="settings-row-label">Timestamps</div></div>
+          <div class="switch" data-toggle="timestamps"><div class="switch-knob"></div></div>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-label">AI Assistant</div>
+        <div class="settings-row">
+          <div><div class="settings-row-label">Enable AI features</div></div>
+          <div class="switch on" data-toggle="aiEnabled"><div class="switch-knob"></div></div>
+        </div>
+        <div class="settings-row">
+          <div><div class="settings-row-label">Model</div></div>
+          <select class="settings-select" id="modelSelect">
+            <option>claude-sonnet-4-6</option>
+          </select>
+        </div>
+        <div class="range-row">
+          <div style="display:flex; justify-content:space-between;">
+            <span class="settings-row-label">Temperature</span>
+            <span class="settings-row-sub" id="tempVal">0.4</span>
+          </div>
+          <input type="range" id="tempSlider" min="0" max="1" step="0.1" value="0.4">
+        </div>
+        <div style="padding:11px 16px 16px;">
+          <div class="settings-row-label" style="margin-bottom:2px;">API key</div>
+          <div class="settings-row-sub">Not required in this environment — requests are proxied automatically.</div>
+          <input class="api-input" placeholder="Configured automatically" disabled value="•••••••••••••••••••••• (managed)">
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============ HOME / DASHBOARD ============ -->
+  <div class="home-screen" id="homeScreen">
+    <div class="home-topbar">
+      <div class="home-brand">
+        <div class="home-brand-mark">λ</div>
+        <div class="home-brand-name">Luma</div>
+      </div>
+      <button class="home-search-btn" id="btnHomeSearch">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      </button>
+    </div>
+    <div class="home-search-bar" id="homeSearchBar" style="display:none;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      <input type="text" id="homeSearchInput" placeholder="Search files and projects">
+    </div>
+    <div class="home-actions">
+      <button class="home-action" id="haNew">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        <div class="home-action-label">New project</div>
+      </button>
+      <button class="home-action" id="haOpen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+        <div class="home-action-label">Open file</div>
+      </button>
+      <button class="home-action" id="haImport">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <div class="home-action-label">Import</div>
+      </button>
+    </div>
+    <div class="home-section-label">Recent</div>
+    <div class="home-list" id="homeList"></div>
+  </div>
+
+  <!-- ============ MODAL ============ -->
+  <div class="modal-scrim" id="modalScrim">
+    <div class="modal-box">
+      <div class="modal-title" id="modalTitle">New file</div>
+      <div class="modal-sub" id="modalSub">Create a new Lua file in this project.</div>
+      <input class="modal-input" id="modalInput" placeholder="filename.lua">
+      <div class="modal-actions">
+        <button class="modal-btn" id="modalCancel">Cancel</button>
+        <button class="modal-btn primary" id="modalConfirm">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ============================================================
+   STATE
+   ============================================================ */
+const LS_KEY = 'luma_ide_state_v1';
+
+let state = {
+  files: {
+    'main.lua': `local name = "World"\n\nprint("Hello " .. name)\nprint("Lua is running!")\n\nlocal function isPrime(n)\n    if n < 2 then return false end\n    for i = 2, math.floor(math.sqrt(n)) do\n        if n % i == 0 then return false end\n    end\n    return true\nend\n\nfor i = 2, 20 do\n    if isPrime(i) then\n        io.write(i .. " ")\n    end\nend\nprint()\n`,
+    'config.lua': `-- Project configuration\nlocal config = {\n    debug = true,\n    version = "1.0.0"\n}\n\nreturn config\n`,
+    'utils.lua': `-- Shared utility functions\nlocal utils = {}\n\nfunction utils.trim(s)\n    return s:match("^%s*(.-)%s*$")\nend\n\nreturn utils\n`,
+    'modules/helper.lua': `-- Helper module\nlocal helper = {}\n\nfunction helper.double(x)\n    return x * 2\nend\n\nreturn helper\n`,
+  },
+  fileMeta: {
+    'main.lua':   {modified: Date.now() - 2*60*1000},
+    'config.lua': {modified: Date.now() - 86400*1000},
+    'utils.lua':  {modified: Date.now() - 3*86400*1000},
+    'modules/helper.lua': {modified: Date.now() - 3*86400*1000},
+  },
+  activeFile: 'main.lua',
+  settings: {
+    fontSize: 15, tabSize: 2, wordWrap: false, lineNumbers: true,
+    autoIndent: true, folding: true, theme: 'dark', accent: '#7ea6c4',
+    timeout: 5, autoScroll: true, timestamps: false, aiEnabled: true, temperature: 0.4
+  },
+  dirty: false,
+};
+
+try {
+  const saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+  if (saved) state = Object.assign(state, saved, {settings: Object.assign(state.settings, saved.settings||{})});
+} catch(e){}
+
+function persist(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){}
+}
+
+/* ============================================================
+   CODEMIRROR EDITOR
+   ============================================================ */
+const cm = CodeMirror.fromTextArea(document.getElementById('codeArea'), {
+  mode: 'lua',
+  theme: 'default',
+  lineNumbers: state.settings.lineNumbers,
+  indentUnit: state.settings.tabSize,
+  tabSize: state.settings.tabSize,
+  indentWithTabs: false,
+  smartIndent: state.settings.autoIndent,
+  lineWrapping: state.settings.wordWrap,
+  matchBrackets: true,
+  autoCloseBrackets: true,
+  styleActiveLine: true,
+  foldGutter: state.settings.folding,
+  gutters: state.settings.folding ? ["CodeMirror-linenumbers","CodeMirror-foldgutter"] : ["CodeMirror-linenumbers"],
+  extraKeys: {
+    "Tab": function(cm){ cm.replaceSelection(" ".repeat(cm.getOption("indentUnit")), "end"); },
+    "Cmd-Z": "undo", "Ctrl-Z": "undo",
+    "Cmd-Y": "redo", "Ctrl-Y": "redo", "Shift-Ctrl-Z":"redo",
+    "Cmd-F": "findPersistent", "Ctrl-F": "findPersistent",
+  }
+});
+cm.getWrapperElement().style.fontSize = state.settings.fontSize + 'px';
+cm.setValue(state.files[state.activeFile] || '');
+cm.on('change', ()=>{
+  state.files[state.activeFile] = cm.getValue();
+  markDirty();
+});
+
+function markDirty(){
+  state.dirty = true;
+  document.getElementById('fileDot').classList.remove('saved');
+}
+function markSaved(){
+  state.dirty = false;
+  document.getElementById('fileDot').classList.add('saved');
+  if(state.fileMeta[state.activeFile]) state.fileMeta[state.activeFile].modified = Date.now();
+  persist();
+}
+// autosave debounce
+let saveTimer = null;
+cm.on('change', ()=>{
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(markSaved, 600);
+});
+
+/* ============================================================
+   TOP BAR WIRES
+   ============================================================ */
+document.getElementById('topFileName').textContent = state.activeFile.split('/').pop();
+document.getElementById('btnUndo').onclick = ()=> cm.undo();
+document.getElementById('btnRedo').onclick = ()=> cm.redo();
+document.getElementById('btnFileMenu').onclick = ()=> openPanel('filesPanel');
+
+/* ============================================================
+   KEYBOARD TOOLBAR
+   ============================================================ */
+document.getElementById('kbdToolbar').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.kbd-key');
+  if(!btn) return;
+  cm.focus();
+  if(btn.dataset.ch !== undefined){
+    cm.replaceSelection(btn.dataset.ch);
+  } else if(btn.dataset.act){
+    const act = btn.dataset.act;
+    const cur = cm.getCursor();
+    if(act==='tab') cm.replaceSelection(" ".repeat(state.settings.tabSize));
+    if(act==='left') cm.setCursor({line:cur.line, ch: Math.max(0,cur.ch-1)});
+    if(act==='right') cm.setCursor({line:cur.line, ch: cur.ch+1});
+    if(act==='up') cm.execCommand('goLineUp');
+    if(act==='down') cm.execCommand('goLineDown');
+    if(act==='undo') cm.undo();
+    if(act==='redo') cm.redo();
+  }
+});
+
+/* ============================================================
+   LUA EXECUTION (Fengari — real Lua 5.3 VM)
+   ============================================================ */
+const consoleScroll = document.getElementById('consoleScroll');
+let consoleLines = { output: [], errors: [], logs: [] };
+let activeTab = 'output';
+let errCountVal = 0;
+
+function fmtTime(){
+  const d = new Date();
+  return d.toTimeString().slice(0,8);
+}
+
+function pushLine(tab, cls, text){
+  consoleLines[tab].push({cls, text, ts: fmtTime()});
+  if(tab==='errors'){ errCountVal++; document.getElementById('errCount').textContent = errCountVal; }
+  if(tab !== 'logs'){
+    consoleLines.logs.push({cls, text, ts: fmtTime()});
+  }
+  if(activeTab===tab || (tab!=='logs' && activeTab==='logs')) renderConsole();
+}
+
+function renderConsole(){
+  const lines = consoleLines[activeTab];
+  if(lines.length===0){
+    consoleScroll.innerHTML = `<div class="console-empty">No ${activeTab} yet — run your code to see results here.</div>`;
+    return;
+  }
+  consoleScroll.innerHTML = lines.map(l=>
+    `<div class="console-line ${l.cls}"><span class="ts">${l.text ? l.ts : ''}</span><span>${escapeHtml(l.text)}</span></div>`
+  ).join('');
+  if(state.settings.autoScroll) consoleScroll.scrollTop = consoleScroll.scrollHeight;
+}
+function escapeHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+document.querySelectorAll('.console-tab').forEach(tab=>{
+  tab.onclick = ()=>{
+    document.querySelectorAll('.console-tab').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    activeTab = tab.dataset.tab;
+    renderConsole();
+  };
+});
+
+document.getElementById('btnClearConsole').onclick = ()=>{
+  consoleLines = {output:[], errors:[], logs:[]};
+  errCountVal = 0;
+  document.getElementById('errCount').textContent = '0';
+  renderConsole();
+  showToast('Console cleared');
+};
+document.getElementById('btnCopyConsole').onclick = ()=>{
+  const text = consoleLines[activeTab].map(l=>l.text).join('\n');
+  navigator.clipboard && navigator.clipboard.writeText(text).then(()=> showToast('Copied to clipboard'));
+};
+
+function setStatus(kind, text){
+  const dot = document.getElementById('statusDot');
+  dot.className = 'status-dot' + (kind ? ' '+kind : '');
+  document.getElementById('statusText').textContent = text;
+}
+
+let isRunning = false;
+document.getElementById('btnRun').onclick = runCode;
+
+function runCode(){
+  if(isRunning) return;
+  isRunning = true;
+  const runBtn = document.getElementById('btnRun');
+  runBtn.classList.add('running');
+  document.getElementById('runLabel').innerHTML = '';
+  const spinner = document.createElement('span');
+  spinner.className = 'run-spinner';
+  runBtn.querySelector('svg').style.display='none';
+  runBtn.appendChild(spinner);
+  setStatus('running', 'Running…');
+  setConsoleState('half');
+
+  const code = cm.getValue();
+  const start = performance.now();
+
+  // slight defer so spinner paints before potentially heavy sync execution
+  setTimeout(()=>{
+    try{
+      const L = fengari.lauxlib.luaL_newstate();
+      fengari.lualib.luaL_openlibs(L);
+
+      // override print / io.write to capture output
+      const outBuf = [];
+      fengari.lua.lua_pushjsfunction(L, function(L){
+        const n = fengari.lua.lua_gettop(L);
+        const parts = [];
+        for(let i=1;i<=n;i++){
+          parts.push(fengari.lauxlib.luaL_tolstring(L, i));
+        }
+        outBuf.push(parts.join('\t'));
+        pushLine('output','out', parts.join('\t'));
+        return 0;
+      });
+      fengari.lua.lua_setglobal(L, fengari.to_luastring("print"));
+
+      // io.write (no newline)
+      fengari.lua.lua_getglobal(L, fengari.to_luastring("io"));
+      fengari.lua.lua_pushjsfunction(L, function(L){
+        const n = fengari.lua.lua_gettop(L);
+        let s = '';
+        for(let i=1;i<=n;i++){ s += fengari.lua.lua_tojsstring(L, i); }
+        // buffer partial lines
+        pendingWrite += s;
+        const parts = pendingWrite.split('\n');
+        pendingWrite = parts.pop();
+        parts.forEach(p=> pushLine('output','out', p));
+        return 0;
+      });
+      fengari.lua.lua_setfield(L, -2, fengari.to_luastring("write"));
+      fengari.lua.lua_pop(L, 1);
+
+      var pendingWrite = '';
+
+      const status = fengari.lauxlib.luaL_loadstring(L, fengari.to_luastring(code));
+      if(status !== fengari.lua.LUA_OK){
+        const err = fengari.lua.lua_tojsstring(L, -1);
+        throw new Error(err);
+      }
+      const callStatus = fengari.lua.lua_pcall(L, 0, 0, 0);
+      if(callStatus !== fengari.lua.LUA_OK){
+        const err = fengari.lua.lua_tojsstring(L, -1);
+        throw new Error(err);
+      }
+      if(pendingWrite) pushLine('output','out', pendingWrite);
+
+      const elapsed = (performance.now() - start).toFixed(elapsedDigits(performance.now()-start));
+      pushLine('output','sys', '');
+      pushLine('output','sys', 'Process finished');
+      pushLine('output','sys', `Execution time: ${(performance.now()-start).toFixed(1)}ms`);
+      setStatus('ok', `Finished · ${(performance.now()-start).toFixed(1)}ms`);
+    } catch(e){
+      const msg = e.message || String(e);
+      const lineMatch = msg.match(/:(\d+):/);
+      const lineInfo = lineMatch ? ` (line ${lineMatch[1]})` : '';
+      pushLine('errors','err', msg);
+      pushLine('output','err', `Error${lineInfo}: ${cleanLuaError(msg)}`);
+      setStatus('err', 'Error — see console');
+    } finally {
+      isRunning = false;
+      runBtn.classList.remove('running');
+      runBtn.querySelector('svg').style.display='';
+      const sp = runBtn.querySelector('.run-spinner');
+      if(sp) sp.remove();
+      document.getElementById('runLabel').textContent = 'Run';
+    }
+  }, 30);
+}
+function elapsedDigits(ms){ return ms < 10 ? 2 : 1; }
+function cleanLuaError(msg){
+  return msg.replace(/^\[string "[^"]*"\]:/, 'line ');
+}
+
+/* ============================================================
+   CONSOLE BOTTOM SHEET — drag interactions
+   ============================================================ */
+const sheet = document.getElementById('consoleSheet');
+const handle = document.getElementById('consoleHandle');
+let sheetState = 'collapsed'; // collapsed | half | full
+let dragStartY = 0, dragStartHeight = 0, dragging = false;
+
+function vh(pct){ return window.innerHeight * pct / 100; }
+
+function setConsoleState(s){
+  sheetState = s;
+  sheet.classList.remove('state-half','state-full');
+  if(s==='half') sheet.classList.add('state-half');
+  if(s==='full') sheet.classList.add('state-full');
+  if(s==='collapsed') sheet.style.height = '44px';
+  else sheet.style.height = '';
+  renderConsole();
+}
+
+handle.addEventListener('click', (e)=>{
+  if(e.target.closest('.console-qbtn')) return;
+  if(dragMoved) { dragMoved = false; return; }
+  setConsoleState(sheetState === 'collapsed' ? 'half' : (sheetState==='half' ? 'full' : 'collapsed'));
+});
+
+let dragMoved = false;
+function onDragStart(clientY){
+  dragging = true;
+  dragMoved = false;
+  dragStartY = clientY;
+  dragStartHeight = sheet.getBoundingClientRect().height;
+  sheet.classList.add('dragging');
+}
+function onDragMove(clientY){
+  if(!dragging) return;
+  const delta = dragStartY - clientY;
+  if(Math.abs(delta) > 4) dragMoved = true;
+  let h = dragStartHeight + delta;
+  h = Math.max(44, Math.min(window.innerHeight*0.9, h));
+  sheet.style.height = h + 'px';
+  sheet.classList.toggle('state-half', h > 120);
+  sheet.classList.toggle('state-full', h > vh(60));
+  if(h>120) renderConsole();
+}
+function onDragEnd(){
+  if(!dragging) return;
+  dragging = false;
+  sheet.classList.remove('dragging');
+  const h = sheet.getBoundingClientRect().height;
+  const vhpx = window.innerHeight;
+  if(h < vhpx*0.18) setConsoleState('collapsed');
+  else if(h < vhpx*0.6) setConsoleState('half');
+  else setConsoleState('full');
+}
+handle.addEventListener('touchstart', e=> onDragStart(e.touches[0].clientY), {passive:true});
+handle.addEventListener('touchmove', e=> onDragMove(e.touches[0].clientY), {passive:true});
+handle.addEventListener('touchend', onDragEnd);
+handle.addEventListener('mousedown', e=>{ onDragStart(e.clientY); const mm=(ev)=>onDragMove(ev.clientY); const mu=()=>{onDragEnd(); document.removeEventListener('mousemove',mm); document.removeEventListener('mouseup',mu);}; document.addEventListener('mousemove',mm); document.addEventListener('mouseup',mu); });
+
+renderConsole();
+
+/* ============================================================
+   PANELS (Files / AI / Settings)
+   ============================================================ */
+const scrim = document.getElementById('panelScrim');
+function openPanel(id){
+  document.getElementById(id).classList.add('open');
+  scrim.classList.add('open');
+}
+function closeAllPanels(){
+  document.querySelectorAll('.side-panel').forEach(p=>p.classList.remove('open'));
+  scrim.classList.remove('open');
+}
+scrim.onclick = closeAllPanels;
+document.querySelectorAll('[data-close]').forEach(btn=>{
+  btn.onclick = ()=> closeAllPanels();
+});
+document.getElementById('btnFiles').onclick = ()=>{ renderFileTree(); openPanel('filesPanel'); };
+document.getElementById('btnAI').onclick = ()=> openPanel('aiPanel');
+document.getElementById('btnSettings').onclick = ()=> openPanel('settingsPanel');
+
+/* ---------- Files panel ---------- */
+function fileIcon(active){
+  return `<svg class="file-icon ${active?'active':''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+}
+function folderIcon(){
+  return `<svg class="file-icon folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`;
+}
+function relTime(ts){
+  const diff = Date.now() - ts;
+  const min = Math.floor(diff/60000);
+  if(min < 1) return 'just now';
+  if(min < 60) return `${min} minute${min===1?'':'s'} ago`;
+  const hr = Math.floor(min/60);
+  if(hr < 24) return hr===1 ? 'an hour ago' : `${hr} hours ago`;
+  const day = Math.floor(hr/24);
+  if(day===1) return 'yesterday';
+  if(day < 7) return `${day} days ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+function renderFileTree(){
+  const tree = document.getElementById('fileTree');
+  const paths = Object.keys(state.files).sort();
+  const folders = {};
+  paths.forEach(p=>{
+    const parts = p.split('/');
+    if(parts.length>1) folders[parts[0]] = (folders[parts[0]]||[]).concat(p);
+  });
+  let html = '<div class="file-section-label">MyProject</div>';
+  paths.filter(p=>!p.includes('/')).forEach(p=>{
+    html += fileRowHtml(p, false);
+  });
+  Object.keys(folders).forEach(folder=>{
+    html += `<div class="file-row"><div class="file-row-indent"></div>${folderIcon()}<div class="file-row-name">${folder}/</div></div>`;
+    folders[folder].forEach(p=> html += fileRowHtml(p, true));
+  });
+  tree.innerHTML = html;
+
+  tree.querySelectorAll('.file-row[data-path]').forEach(row=>{
+    row.addEventListener('click', (e)=>{
+      if(e.target.closest('.file-mini-btn')) return;
+      openFile(row.dataset.path);
+      closeAllPanels();
+    });
+  });
+  tree.querySelectorAll('[data-action]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      handleFileAction(btn.dataset.action, btn.dataset.path);
+    });
+  });
+}
+function fileRowHtml(path, indented){
+  const active = path === state.activeFile;
+  const name = path.split('/').pop();
+  return `<div class="file-row" data-path="${path}">
+    ${indented ? '<div class="file-row-indent"></div>' : ''}
+    ${fileIcon(active)}
+    <div class="file-row-name ${active?'active':''}">${name}</div>
+    <div class="file-row-actions">
+      <button class="file-mini-btn" data-action="duplicate" data-path="${path}" title="Duplicate">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      </button>
+      <button class="file-mini-btn" data-action="rename" data-path="${path}" title="Rename">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+      </button>
+      <button class="file-mini-btn" data-action="delete" data-path="${path}" title="Delete">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+      </button>
+    </div>
+  </div>`;
+}
+
+function openFile(path){
+  state.files[state.activeFile] = cm.getValue();
+  state.activeFile = path;
+  cm.setValue(state.files[path] || '');
+  document.getElementById('topFileName').textContent = path.split('/').pop();
+  markSaved();
+}
+
+function handleFileAction(action, path){
+  if(action==='duplicate'){
+    let base = path.replace(/\.lua$/,'');
+    let n = 1, newPath;
+    do { newPath = `${base}_copy${n>1?n:''}.lua`; n++; } while(state.files[newPath]);
+    state.files[newPath] = state.files[path];
+    state.fileMeta[newPath] = {modified: Date.now()};
+    renderFileTree();
+    showToast(`Duplicated as ${newPath.split('/').pop()}`);
+    persist();
+  } else if(action==='rename'){
+    openModal({
+      title: 'Rename file', sub: `Rename ${path.split('/').pop()}`, value: path.split('/').pop(), confirmLabel:'Rename',
+      onConfirm: (val)=>{
+        if(!val) return;
+        val = val.endsWith('.lua') ? val : val + '.lua';
+        const parts = path.split('/'); parts[parts.length-1] = val;
+        const newPath = parts.join('/');
+        if(state.files[newPath] && newPath!==path){ showToast('A file with that name exists', true); return; }
+        state.files[newPath] = state.files[path];
+        state.fileMeta[newPath] = state.fileMeta[path];
+        if(newPath !== path){ delete state.files[path]; delete state.fileMeta[path]; }
+        if(state.activeFile === path) { state.activeFile = newPath; document.getElementById('topFileName').textContent = val; }
+        renderFileTree();
+        persist();
+      }
+    });
+  } else if(action==='delete'){
+    openModal({
+      title: 'Delete file', sub: `Delete ${path.split('/').pop()}? This can't be undone.`, hideInput:true, confirmLabel:'Delete', danger:true,
+      onConfirm: ()=>{
+        delete state.files[path];
+        delete state.fileMeta[path];
+        if(state.activeFile === path){
+          const remaining = Object.keys(state.files);
+          openFile(remaining[0] || 'main.lua');
+          if(remaining.length===0){ state.files['main.lua']=''; state.fileMeta['main.lua']={modified:Date.now()}; }
+        }
+        renderFileTree();
+        showToast('File deleted');
+        persist();
+      }
+    });
+  }
+}
+
+document.getElementById('btnNewFile').onclick = ()=>{
+  openModal({
+    title:'New file', sub:'Create a new Lua file in this project.', placeholder:'filename.lua', confirmLabel:'Create',
+    onConfirm:(val)=>{
+      if(!val) return;
+      val = val.endsWith('.lua') ? val : val + '.lua';
+      if(state.files[val]){ showToast('A file with that name exists', true); return; }
+      state.files[val] = '-- ' + val + '\n';
+      state.fileMeta[val] = {modified: Date.now()};
+      openFile(val);
+      renderFileTree();
+      closeAllPanels();
+      persist();
+    }
+  });
+};
+
+document.getElementById('btnImport').onclick = ()=> document.getElementById('importInput').click();
+document.getElementById('importInput').onchange = (e)=>{
+  const files = Array.from(e.target.files || []);
+  files.forEach(f=>{
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      state.files[f.name] = reader.result;
+      state.fileMeta[f.name] = {modified: Date.now()};
+      renderFileTree();
+      persist();
+      showToast(`Imported ${f.name}`);
+    };
+    reader.readAsText(f);
+  });
+  e.target.value = '';
+};
+
+/* Export current file via share/download */
+function exportCurrentFile(){
+  const blob = new Blob([cm.getValue()], {type:'text/x-lua'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = state.activeFile.split('/').pop();
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  showToast('Exported ' + state.activeFile.split('/').pop());
+}
+
+/* ============================================================
+   AI ASSISTANT PANEL
+   ============================================================ */
+const aiMsgsEl = document.getElementById('aiMsgs');
+const aiEmpty = document.getElementById('aiEmpty');
+const aiSuggestions = document.getElementById('aiSuggestions');
+let aiHistory = [];
+
+function scrollAI(){ document.getElementById('aiContent').scrollTop = 999999; }
+
+function addAIMessage(role, text, codeBlock, actions){
+  aiEmpty.style.display = 'none';
+  aiSuggestions.style.display = 'none';
+  const div = document.createElement('div');
+  div.className = 'ai-msg ' + (role==='user' ? 'user' : 'ai');
+  let inner = `<div>${escapeHtml(text)}</div>`;
+  if(codeBlock){
+    inner += `<pre>${escapeHtml(codeBlock)}</pre>`;
+    inner += `<div class="ai-msg-actions">
+      <button class="ai-action-btn" data-ai-act="insert">Insert</button>
+      <button class="ai-action-btn" data-ai-act="replace">Replace Selection</button>
+      <button class="ai-action-btn" data-ai-act="copy">Copy</button>
+      <button class="ai-action-btn" data-ai-act="explain">Explain</button>
+    </div>`;
+  }
+  div.innerHTML = inner;
+  if(codeBlock){
+    div.querySelectorAll('[data-ai-act]').forEach(btn=>{
+      btn.onclick = ()=>{
+        const act = btn.dataset.aiAct;
+        if(act==='insert'){ cm.replaceSelection(codeBlock, 'end'); showToast('Inserted into editor'); closeAllPanels(); }
+        if(act==='replace'){ cm.replaceSelection(codeBlock); showToast('Replaced selection'); closeAllPanels(); }
+        if(act==='copy'){ navigator.clipboard && navigator.clipboard.writeText(codeBlock).then(()=>showToast('Copied')); }
+        if(act==='explain'){ sendAI('Explain this code:\n'+codeBlock); }
+      };
+    });
+  }
+  aiMsgsEl.appendChild(div);
+  scrollAI();
+}
+
+function addTyping(){
+  const div = document.createElement('div');
+  div.className = 'ai-msg ai';
+  div.id = 'aiTyping';
+  div.innerHTML = '<div class="ai-typing"><span></span><span></span><span></span></div>';
+  aiMsgsEl.appendChild(div);
+  scrollAI();
+}
+function removeTyping(){
+  const t = document.getElementById('aiTyping');
+  if(t) t.remove();
+}
+
+document.querySelectorAll('.ai-suggestion').forEach(btn=>{
+  btn.onclick = ()=>{
+    const p = btn.dataset.prompt;
+    if(p==='explain'){
+      const sel = cm.getSelection() || cm.getValue();
+      sendAI('Explain this code:\n'+sel);
+    } else if(p==='debug'){
+      const lastErr = consoleLines.errors[consoleLines.errors.length-1];
+      sendAI(lastErr ? `Debug this error:\n${lastErr.text}\n\nIn this code:\n${cm.getValue()}` : 'Debug my code:\n'+cm.getValue());
+    } else if(p==='prime'){
+      sendAI('Create a function that checks whether a number is prime');
+    } else if(p==='optimize'){
+      const sel = cm.getSelection() || cm.getValue();
+      sendAI('Optimize this Lua code:\n'+sel);
+    }
+  };
+});
+
+const aiInput = document.getElementById('aiInput');
+aiInput.addEventListener('input', ()=>{
+  aiInput.style.height = 'auto';
+  aiInput.style.height = Math.min(100, aiInput.scrollHeight) + 'px';
+});
+document.getElementById('aiSend').onclick = ()=> sendAI(aiInput.value.trim());
+aiInput.addEventListener('keydown', (e)=>{
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendAI(aiInput.value.trim()); }
+});
+
+async function sendAI(prompt){
+  if(!prompt) return;
+  if(!state.settings.aiEnabled){ showToast('AI features are disabled in Settings', true); return; }
+  aiInput.value=''; aiInput.style.height='auto';
+  addAIMessage('user', prompt);
+  addTyping();
+
+  const systemPrompt = `You are an expert Lua programming assistant embedded in a mobile Lua IDE called Luma.
+The user's current file (${state.activeFile}) contains:
+---
+${cm.getValue()}
+---
+Respond concisely and practically. When the user wants code written, generated, refactored, debugged, or converted from natural language, respond with a short 1-2 sentence explanation, then put ONLY the final Lua code in a fenced code block using triple backticks with "lua" as the language tag. Do not include multiple code blocks. If no code is needed (e.g. pure explanation), just answer in plain text with no code block.`;
+
+  try{
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 1000,
+        system: systemPrompt,
+        messages: [{role:"user", content: prompt}]
+      })
+    });
+    const data = await resp.json();
+    removeTyping();
+    const text = (data.content||[]).map(b=>b.text||'').join('\n');
+    const codeMatch = text.match(/```(?:lua)?\n([\s\S]*?)```/);
+    if(codeMatch){
+      const explanation = text.replace(codeMatch[0],'').trim() || 'Here you go:';
+      addAIMessage('ai', explanation, codeMatch[1].trim());
+    } else {
+      addAIMessage('ai', text || 'No response.');
+    }
+  }catch(e){
+    removeTyping();
+    addAIMessage('ai', "I couldn't reach the AI service right now. Check your connection and try again.");
+  }
+}
+
+/* ============================================================
+   SETTINGS PANEL WIRES
+   ============================================================ */
+document.querySelectorAll('.switch[data-toggle]').forEach(sw=>{
+  const key = sw.dataset.toggle;
+  if(state.settings[key]) sw.classList.add('on');
+  sw.onclick = ()=>{
+    state.settings[key] = !state.settings[key];
+    sw.classList.toggle('on', state.settings[key]);
+    applySettings();
+    persist();
+  };
+});
+
+document.querySelectorAll('.stepper button').forEach(btn=>{
+  btn.onclick = ()=>{
+    const key = btn.dataset.step;
+    const dir = parseInt(btn.dataset.dir);
+    if(key==='fontSize'){
+      state.settings.fontSize = Math.max(11, Math.min(22, state.settings.fontSize + dir));
+      document.getElementById('valFontSize').textContent = state.settings.fontSize;
+    } else if(key==='tabSize'){
+      state.settings.tabSize = Math.max(2, Math.min(8, state.settings.tabSize + dir*2));
+      document.getElementById('valTabSize').textContent = state.settings.tabSize;
+    } else if(key==='timeout'){
+      state.settings.timeout = Math.max(1, Math.min(30, state.settings.timeout + dir));
+      document.getElementById('valTimeout').textContent = state.settings.timeout + 's';
+    }
+    applySettings();
+    persist();
+  };
+});
+
+document.getElementById('themeSeg').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.seg-btn');
+  if(!btn) return;
+  document.querySelectorAll('#themeSeg .seg-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  state.settings.theme = btn.dataset.theme;
+  applyTheme();
+  persist();
+});
+
+document.getElementById('accentSwatches').addEventListener('click', (e)=>{
+  const sw = e.target.closest('.accent-swatch');
+  if(!sw) return;
+  document.querySelectorAll('.accent-swatch').forEach(s=> s.style.border = '2px solid transparent');
+  sw.style.border = '2px solid var(--text)';
+  state.settings.accent = sw.dataset.accent;
+  document.documentElement.style.setProperty('--accent', sw.dataset.accent);
+  persist();
+});
+
+document.getElementById('tempSlider').addEventListener('input', (e)=>{
+  state.settings.temperature = parseFloat(e.target.value);
+  document.getElementById('tempVal').textContent = state.settings.temperature.toFixed(1);
+  persist();
+});
+
+function applySettings(){
+  cm.getWrapperElement().style.fontSize = state.settings.fontSize + 'px';
+  cm.setOption('indentUnit', state.settings.tabSize);
+  cm.setOption('tabSize', state.settings.tabSize);
+  cm.setOption('lineWrapping', state.settings.wordWrap);
+  cm.setOption('lineNumbers', state.settings.lineNumbers);
+  cm.setOption('smartIndent', state.settings.autoIndent);
+  cm.setOption('foldGutter', state.settings.folding);
+  cm.setOption('gutters', state.settings.folding ? ["CodeMirror-linenumbers","CodeMirror-foldgutter"] : ["CodeMirror-linenumbers"]);
+  document.getElementById('consoleSheet').classList.toggle('show-ts', state.settings.timestamps);
+  cm.refresh();
+}
+function applyTheme(){
+  document.body.classList.remove('theme-light','theme-oled');
+  if(state.settings.theme === 'oled'){ document.documentElement.style.setProperty('--bg','#000000'); document.documentElement.style.setProperty('--surface','#050505'); document.documentElement.style.setProperty('--surface-raised','#0a0a0a'); }
+  else if(state.settings.theme === 'light'){
+    document.documentElement.style.setProperty('--bg','#f5f6f8');
+    document.documentElement.style.setProperty('--surface','#ffffff');
+    document.documentElement.style.setProperty('--surface-raised','#f0f1f3');
+    document.documentElement.style.setProperty('--surface-hi','#e8e9ec');
+    document.documentElement.style.setProperty('--text','#1a1d21');
+    document.documentElement.style.setProperty('--text-dim','#5c6470');
+    document.documentElement.style.setProperty('--border','#d8dade');
+    document.documentElement.style.setProperty('--border-soft','#e4e5e8');
+  } else {
+    document.documentElement.style.setProperty('--bg','#0c0e11');
+    document.documentElement.style.setProperty('--surface','#14171b');
+    document.documentElement.style.setProperty('--surface-raised','#1a1e23');
+    document.documentElement.style.setProperty('--surface-hi','#20252b');
+    document.documentElement.style.setProperty('--text','#e6e8eb');
+    document.documentElement.style.setProperty('--text-dim','#9aa1ab');
+    document.documentElement.style.setProperty('--border','#262b32');
+    document.documentElement.style.setProperty('--border-soft','#1d2127');
+  }
+}
+document.documentElement.style.setProperty('--accent', state.settings.accent);
+document.getElementById('tempSlider').value = state.settings.temperature;
+document.getElementById('tempVal').textContent = state.settings.temperature.toFixed(1);
+document.getElementById('valFontSize').textContent = state.settings.fontSize;
+document.getElementById('valTabSize').textContent = state.settings.tabSize;
+document.getElementById('valTimeout').textContent = state.settings.timeout+'s';
+
+/* ============================================================
+   HOME / DASHBOARD
+   ============================================================ */
+const homeScreen = document.getElementById('homeScreen');
+function renderHome(filterTerm){
+  const list = document.getElementById('homeList');
+  let paths = Object.keys(state.fileMeta).sort((a,b)=> (state.fileMeta[b].modified||0)-(state.fileMeta[a].modified||0));
+  if(filterTerm){
+    paths = paths.filter(p=> p.toLowerCase().includes(filterTerm.toLowerCase()));
+  }
+  if(paths.length===0){
+    list.innerHTML = `<div class="home-empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      <div class="home-empty-title">No files yet</div>
+      <div class="home-empty-sub">Create a new file to get started</div>
+    </div>`;
+    return;
+  }
+  list.innerHTML = paths.map(p=>`
+    <div class="project-row" data-path="${p}">
+      <div class="project-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+      <div class="project-meta">
+        <div class="project-name">${p.split('/').pop().replace('.lua','')}</div>
+        <div class="project-sub">Modified ${relTime(state.fileMeta[p].modified||Date.now())}</div>
+      </div>
+      <svg class="project-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </div>
+  `).join('');
+  list.querySelectorAll('.project-row').forEach(row=>{
+    row.onclick = ()=>{ openFile(row.dataset.path); hideHome(); };
+  });
+}
+function hideHome(){ homeScreen.classList.add('hidden'); }
+function showHome(){ renderHome(); homeScreen.classList.remove('hidden'); }
+
+document.getElementById('haNew').onclick = ()=>{
+  openModal({
+    title:'New project', sub:'Name your new Lua file.', placeholder:'filename.lua', confirmLabel:'Create',
+    onConfirm:(val)=>{
+      if(!val) return;
+      val = val.endsWith('.lua') ? val : val + '.lua';
+      if(state.files[val]){ showToast('A file with that name exists', true); return; }
+      state.files[val] = '-- ' + val + '\n';
+      state.fileMeta[val] = {modified: Date.now()};
+      openFile(val);
+      hideHome();
+      persist();
+    }
+  });
+};
+document.getElementById('haOpen').onclick = ()=>{ renderFileTree(); openPanel('filesPanel'); };
+document.getElementById('haImport').onclick = ()=> document.getElementById('importInput').click();
+document.getElementById('btnHomeSearch').onclick = ()=>{
+  const bar = document.getElementById('homeSearchBar');
+  bar.style.display = bar.style.display==='none' ? 'flex' : 'none';
+  if(bar.style.display==='flex') document.getElementById('homeSearchInput').focus();
+};
+document.getElementById('homeSearchInput').addEventListener('input', (e)=> renderHome(e.target.value));
+
+/* ============================================================
+   MODAL
+   ============================================================ */
+const modalScrim = document.getElementById('modalScrim');
+let modalConfirmCb = null;
+function openModal({title, sub, placeholder, value, confirmLabel, hideInput, danger, onConfirm}){
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalSub').textContent = sub || '';
+  const input = document.getElementById('modalInput');
+  input.style.display = hideInput ? 'none' : 'block';
+  input.placeholder = placeholder || '';
+  input.value = value || '';
+  const confirmBtn = document.getElementById('modalConfirm');
+  confirmBtn.textContent = confirmLabel || 'OK';
+  confirmBtn.className = 'modal-btn primary' + (danger ? ' danger' : '');
+  if(danger) confirmBtn.classList.remove('primary');
+  modalConfirmCb = onConfirm;
+  modalScrim.classList.add('open');
+  if(!hideInput) setTimeout(()=> input.focus(), 100);
+}
+function closeModal(){ modalScrim.classList.remove('open'); modalConfirmCb = null; }
+document.getElementById('modalCancel').onclick = closeModal;
+document.getElementById('modalConfirm').onclick = ()=>{
+  const val = document.getElementById('modalInput').value.trim();
+  if(modalConfirmCb) modalConfirmCb(val);
+  closeModal();
+};
+document.getElementById('modalInput').addEventListener('keydown', (e)=>{
+  if(e.key==='Enter') document.getElementById('modalConfirm').click();
+});
+modalScrim.addEventListener('click', (e)=>{ if(e.target===modalScrim) closeModal(); });
+
+/* ============================================================
+   TOAST
+   ============================================================ */
+let toastTimer = null;
+function showToast(msg, isErr){
+  const t = document.getElementById('toast');
+  t.innerHTML = (isErr
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>'
+  ) + `<span>${msg}</span>`;
+  t.classList.toggle('err-toast', !!isErr);
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> t.classList.remove('show'), 2200);
+}
+
+/* ============================================================
+   INIT
+   ============================================================ */
+applySettings();
+applyTheme();
+renderFileTree();
+showHome();
+
+// keep app usable if fengari fails to load (offline)
+if(typeof fengari === 'undefined'){
+  setStatus('err', 'Lua runtime unavailable offline');
+}
+
+window.addEventListener('beforeunload', ()=>{ state.files[state.activeFile] = cm.getValue(); persist(); });
+
+})();
+</script>
+</body>
+</html>
